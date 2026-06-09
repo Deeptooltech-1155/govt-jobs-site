@@ -1,31 +1,122 @@
-name: Update Government Jobs
+import feedparser
+import os
+from datetime import datetime, timezone
+from pathlib import Path
 
-on:
-  schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+FEEDS = [
+    {"url": "https://www.rojgarresult.com/feed", "label": "Rojgar Result", "color": "blue"},
+    {"url": "https://www.freejobalert.com/feed/", "label": "FreeJobAlert", "color": "green"},
+    {"url": "https://govtjobguru.in/feed", "label": "GovtJobGuru", "color": "orange"},
+]
 
-permissions:
-  contents: write
+def clean(text):
+    import re
+    return re.sub(r"<[^>]+>", " ", text or "").strip()[:200]
 
-jobs:
-  update-jobs:
-    runs-on: ubuntu-latest
+jobs = []
+seen = set()
 
-    steps:
-      - uses: actions/checkout@v4
+for f in FEEDS:
+    try:
+        feed = feedparser.parse(f["url"])
+        for e in feed.entries[:20]:
+            t = (e.get("title") or "").strip()
+            if t and t not in seen:
+                seen.add(t)
+                pub = e.get("published_parsed")
+                if pub:
+                    dt = datetime(*pub[:6], tzinfo=timezone.utc)
+                    date_str = dt.strftime("%d %b %Y")
+                    days_ago = (datetime.now(timezone.utc) - dt).days
+                else:
+                    date_str = "Recent"
+                    days_ago = 999
+                jobs.append({
+                    "title": t,
+                    "link": e.get("link", "#"),
+                    "date": date_str,
+                    "days_ago": days_ago,
+                    "summary": clean(e.get("summary", "")),
+                    "source": f["label"],
+                    "color": f["color"],
+                })
+        print(f"OK: {f['label']} - {len(feed.entries)} entries")
+    except Exception as ex:
+        print(f"SKIP: {f['label']} - {ex}")
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+jobs.sort(key=lambda x: x["days_ago"])
 
-      - run: pip install feedparser requests
+updated = datetime.now(timezone.utc).strftime("%d %b %Y, %H:%M UTC")
 
-      - run: python scripts/fetch_jobs.py
+cards = ""
+for j in jobs:
+    new = '<span style="background:#f97316;color:#fff;font-size:11px;padding:2px 7px;border-radius:4px;font-weight:700">NEW</span>' if j["days_ago"] <= 3 else ""
+    summary = f'<p style="font-size:13px;color:#94a3b8;margin:4px 0 0">{j["summary"]}</p>' if j["summary"] else ""
+    cards += f'''
+<a href="{j["link"]}" target="_blank" rel="noopener" style="display:block;background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px 16px;text-decoration:none;color:inherit;margin-bottom:12px;transition:border-color 0.2s" onmouseover="this.style.borderColor='#f97316'" onmouseout="this.style.borderColor='#334155'">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+    <span style="background:#1d4ed8;color:#dbeafe;font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px">{j["source"]}</span>
+    {new}
+    <span style="margin-left:auto;font-size:12px;color:#64748b">{j["date"]}</span>
+  </div>
+  <div style="font-size:15px;font-weight:600;color:#f1f5f9;line-height:1.4">{j["title"]}</div>
+  {summary}
+  <div style="margin-top:8px;font-size:13px;color:#f97316;font-weight:600">View & Apply →</div>
+</a>'''
 
-      - run: |
-          git config user.name "Jobs Bot"
-          git config user.email "jobsbot@users.noreply.github.com"
-          git add docs/index.html
-          git diff --staged --quiet || git commit -m "auto-update jobs"
-          git push
+html = f"""<!DOCTYPE html>
+<html lang="hi-IN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SarkariNaukri — Latest Govt Jobs</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0f172a;color:#f1f5f9;font-family:sans-serif;min-height:100vh}}
+.header{{background:#1e293b;border-bottom:1px solid #334155;padding:24px 16px;text-align:center}}
+.header h1{{font-size:clamp(1.5rem,4vw,2.2rem);font-weight:700;color:#fff}}.header h1 span{{color:#f97316}}
+.header p{{color:#94a3b8;font-size:14px;margin-top:6px}}
+.controls{{max-width:700px;margin:20px auto 0;padding:0 16px}}
+#search{{width:100%;background:#1e293b;border:1px solid #334155;border-radius:8px;padding:10px 14px;color:#f1f5f9;font-size:14px;outline:none}}
+#search:focus{{border-color:#f97316}}
+.grid{{max-width:700px;margin:16px auto 40px;padding:0 16px}}
+.count{{font-size:13px;color:#64748b;margin-bottom:12px}}
+.empty{{text-align:center;padding:40px;color:#64748b;display:none}}
+footer{{text-align:center;padding:20px;border-top:1px solid #334155;color:#64748b;font-size:13px}}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Sarkari<span>Naukri</span>.live</h1>
+  <p>Latest Government Jobs &nbsp;·&nbsp; Updated: {updated} &nbsp;·&nbsp; {len(jobs)} jobs</p>
+</div>
+<div class="controls">
+  <input id="search" type="search" placeholder="Search jobs..." autocomplete="off">
+</div>
+<div class="grid">
+  <p class="count" id="count">{len(jobs)} jobs found</p>
+  <div id="cards">{cards}</div>
+  <div class="empty" id="empty">No jobs match your search.</div>
+</div>
+<footer>Auto-updated every 6 hours via GitHub Actions</footer>
+<script>
+const allCards=[...document.querySelectorAll('#cards a')];
+document.getElementById('search').addEventListener('input',function(){{
+  const q=this.value.toLowerCase();
+  let n=0;
+  allCards.forEach(c=>{{
+    const show=!q||c.innerText.toLowerCase().includes(q);
+    c.style.display=show?'':'none';
+    if(show)n++;
+  }});
+  document.getElementById('count').textContent=n+' jobs found';
+  document.getElementById('empty').style.display=n?'none':'block';
+}});
+</script>
+</body>
+</html>"""
+
+out = Path("docs")
+out.mkdir(exist_ok=True)
+(out / "index.html").write_text(html, encoding="utf-8")
+print(f"DONE: {len(jobs)} jobs written to docs/index.html")
