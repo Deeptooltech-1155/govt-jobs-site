@@ -2,12 +2,11 @@ name: Update Government Jobs
 
 on:
   schedule:
-    # Runs every 6 hours: 00:00, 06:00, 12:00, 18:00 UTC (5:30am, 11:30am, 5:30pm, 11:30pm IST)
     - cron: '0 */6 * * *'
-  workflow_dispatch:   # Allows manual trigger from GitHub Actions tab
+  workflow_dispatch:
 
 permissions:
-  contents: write      # Required to commit the generated HTML back to repo
+  contents: write
 
 jobs:
   update-jobs:
@@ -15,39 +14,24 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      # 1. Checkout the repository
       - name: Checkout repo
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
-      # 2. Set up Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
-      # 3. Install dependencies
       - name: Install dependencies
         run: pip install feedparser requests
 
-      # 4. (Optional) Install Gemini SDK if you're using AI descriptions
-      #    Uncomment the line below and set USE_GEMINI = True in fetch_jobs.py
-      # - run: pip install google-generativeai
-
-      # 5. Run the fetch + HTML generation script
       - name: Fetch jobs and generate site
-        env:
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}   # Add this secret in repo Settings → Secrets
         run: python scripts/fetch_jobs.py
 
-      # 6. Commit and push the updated docs/index.html
       - name: Commit updated site
         run: |
           git config user.name  "Jobs Bot"
           git config user.email "jobsbot@users.noreply.github.com"
           git add docs/index.html
-          # Only commit if something actually changed
           git diff --staged --quiet || git commit -m "chore: auto-update jobs [$(date -u '+%Y-%m-%d %H:%M UTC')]"
           git push
