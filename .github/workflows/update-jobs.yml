@@ -11,27 +11,21 @@ permissions:
 jobs:
   update-jobs:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: pip install feedparser requests
+      - run: pip install feedparser requests
 
-      - name: Fetch jobs and generate site
-        run: python scripts/fetch_jobs.py
+      - run: python scripts/fetch_jobs.py
 
-      - name: Commit updated site
-        run: |
-          git config user.name  "Jobs Bot"
+      - run: |
+          git config user.name "Jobs Bot"
           git config user.email "jobsbot@users.noreply.github.com"
           git add docs/index.html
-          git diff --staged --quiet || git commit -m "chore: auto-update jobs [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+          git diff --staged --quiet || git commit -m "auto-update jobs"
           git push
